@@ -32,42 +32,43 @@ export type DoctorPatientChatOutput = z.infer<
 export async function doctorPatientChat(
   input: DoctorPatientChatInput
 ): Promise<DoctorPatientChatOutput> {
-  return doctorPatientChatFlow(input);
+  const systemPrompt = `You are a compassionate and knowledgeable doctor. Your role is to converse with a patient (the user) to understand their symptoms and concerns. Be professional, empathetic, and clear in your communication. Ask clarifying questions to gather necessary medical information. The user is the patient.`;
+
+  if (input.history.length === 0) {
+    return { response: "Hello, how can I help you today?" };
+  }
+
+  const llmResponse = await generate({
+    model: 'googleai/gemini-pro',
+    history: [
+      { role: 'system', content: systemPrompt },
+      ...input.history,
+    ],
+    prompt: '', // The last message is the prompt, but it's already in history
+    output: {
+      schema: z.object({
+        response: z.string(),
+      })
+    }
+  });
+
+  const output = llmResponse.output();
+  if (!output) {
+    throw new Error("No output from LLM");
+  }
+
+  return {
+    response: output.response,
+  };
 }
 
-const systemPrompt = `You are a compassionate and knowledgeable doctor. Your role is to converse with a patient (the user) to understand their symptoms and concerns. Be professional, empathetic, and clear in your communication. Ask clarifying questions to gather necessary medical information. The user is the patient.`;
-
-const doctorPatientChatFlow = ai.defineFlow(
+// Keep the flow definition but the exported function above is what will be used.
+// This maintains consistency in the AI flow definitions.
+ai.defineFlow(
   {
     name: 'doctorPatientChatFlow',
     inputSchema: DoctorPatientChatInputSchema,
     outputSchema: DoctorPatientChatOutputSchema,
   },
-  async (input) => {
-    if (input.history.length === 0) {
-      return { response: "Hello, how can I help you today?" };
-    }
-    
-    const llmResponse = await generate({
-      model: 'googleai/gemini-pro',
-      history: [
-        { role: 'system', content: systemPrompt },
-        ...input.history,
-      ],
-      prompt: '', // Prompt can be empty when history is rich
-      output: {
-        schema: z.object({
-          response: z.string(),
-        })
-      }
-    });
-
-    const output = llmResponse.output();
-    if (!output) {
-      throw new Error("No output from LLM");
-    }
-    return {
-      response: output.response,
-    };
-  }
+  doctorPatientChat
 );
