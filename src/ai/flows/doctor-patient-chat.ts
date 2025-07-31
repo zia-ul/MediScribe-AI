@@ -44,6 +44,10 @@ const doctorPatientChatFlow = ai.defineFlow(
     outputSchema: DoctorPatientChatOutputSchema,
   },
   async (input) => {
+    if (input.history.length === 0) {
+      return { response: "Hello, how can I help you today?" };
+    }
+
     const llmResponse = await generate({
       model: 'googleai/gemini-pro',
       history: [
