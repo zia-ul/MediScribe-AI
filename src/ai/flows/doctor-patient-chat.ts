@@ -12,7 +12,7 @@ import { ai } from '@/ai/genkit';
 import { z, generate } from 'genkit';
 
 const MessageSchema = z.object({
-  role: z.enum(['user', 'model']),
+  role: z.enum(['user', 'model', 'system']),
   content: z.string(),
 });
 
@@ -47,17 +47,14 @@ const doctorPatientChatFlow = ai.defineFlow(
     if (input.history.length === 0) {
       return { response: "Hello, how can I help you today?" };
     }
-
-    const latestUserMessage = input.history[input.history.length - 1];
-    const previousHistory = input.history.slice(0, -1);
-
+    
     const llmResponse = await generate({
       model: 'googleai/gemini-pro',
       history: [
         { role: 'system', content: systemPrompt },
-        ...previousHistory,
+        ...input.history,
       ],
-      prompt: latestUserMessage.content,
+      prompt: '', // Prompt can be empty when history is rich
       output: {
         schema: z.object({
           response: z.string(),
