@@ -48,13 +48,16 @@ const doctorPatientChatFlow = ai.defineFlow(
       return { response: "Hello, how can I help you today?" };
     }
 
+    const latestUserMessage = input.history[input.history.length - 1];
+    const previousHistory = input.history.slice(0, -1);
+
     const llmResponse = await generate({
       model: 'googleai/gemini-pro',
       history: [
         { role: 'system', content: systemPrompt },
-        ...input.history,
+        ...previousHistory,
       ],
-      prompt: input.history[input.history.length - 1].content,
+      prompt: latestUserMessage.content,
       output: {
         schema: z.object({
           response: z.string(),
