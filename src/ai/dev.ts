@@ -1,1 +1,6 @@
-// Flows will be imported for their side effects in this file.
+import { config } from 'dotenv';
+config();
+
+import '@/ai/flows/generate-soap-note.ts';
+import '@/ai/flows/transcribe-doctor-patient-conversation.ts';
+import '@/ai/flows/extract-medical-entities.ts';
