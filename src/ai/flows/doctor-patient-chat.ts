@@ -9,7 +9,7 @@
  */
 
 import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { z, generate } from 'genkit';
 
 const MessageSchema = z.object({
   role: z.enum(['user', 'model']),
@@ -35,21 +35,7 @@ export async function doctorPatientChat(
   return doctorPatientChatFlow(input);
 }
 
-const chatPrompt = ai.definePrompt({
-  name: 'doctorPatientChatPrompt',
-  input: { schema: DoctorPatientChatInputSchema },
-  output: { schema: DoctorPatientChatOutputSchema },
-  prompt: `You are a compassionate and knowledgeable doctor. Your role is to converse with a patient (the user) to understand their symptoms and concerns. Be professional, empathetic, and clear in your communication. Ask clarifying questions to gather necessary medical information. The user is the patient.
-
-Continue the following conversation.
-
-{{#each history}}
-{{#if (eq role 'user')}}Patient: {{content}}
-{{else}}Doctor: {{content}}
-{{/if}}
-{{/each}}
-Doctor:`,
-});
+const systemPrompt = `You are a compassionate and knowledgeable doctor. Your role is to converse with a patient (the user) to understand their symptoms and concerns. Be professional, empathetic, and clear in your communication. Ask clarifying questions to gather necessary medical information. The user is the patient.`;
 
 const doctorPatientChatFlow = ai.defineFlow(
   {
@@ -58,7 +44,27 @@ const doctorPatientChatFlow = ai.defineFlow(
     outputSchema: DoctorPatientChatOutputSchema,
   },
   async (input) => {
-    const llmResponse = await chatPrompt(input);
-    return llmResponse.output!;
+    const llmResponse = await generate({
+      model: 'googleai/gemini-pro',
+      prompt: input.history[input.history.length - 1].content,
+      history: input.history.slice(0, -1),
+      config: {
+        // @ts-ignore
+        systemInstruction: systemPrompt,
+      },
+      output: {
+        schema: z.object({
+          response: z.string(),
+        })
+      }
+    });
+
+    const output = llmResponse.output();
+    if (!output) {
+      throw new Error("No output from LLM");
+    }
+    return {
+      response: output.response,
+    };
   }
 );
