@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import type { FC, ChangeEvent } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import type { FC, ChangeEvent, FormEvent } from "react";
 import {
   Mic,
   StopCircle,
@@ -11,21 +11,30 @@ import {
   ClipboardList,
   Stethoscope,
   Upload,
+  Bot,
+  User,
+  Send,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { analyzeTranscript, transcribeAudio } from "@/app/actions";
+import { analyzeTranscript, transcribeAudio, chatWithBot } from "@/app/actions";
 import type { ExtractMedicalEntitiesOutput } from "@/ai/flows/extract-medical-entities";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+import type { ChatHistory } from "@/ai/flows/doctor-patient-chat";
 
-type Status = "idle" | "recording" | "transcribing" | "analyzing" | "error";
+type Status = "idle" | "recording" | "transcribing" | "analyzing" | "error" | "chatting";
 
 const StatusIndicator: FC<{ status: Status }> = ({ status }) => {
   const statusConfig = {
-    idle: { text: "Ready to record", color: "bg-gray-500" },
+    idle: { text: "Ready", color: "bg-gray-500" },
     recording: { text: "Recording...", color: "bg-red-500 animate-pulse" },
     transcribing: {
       text: "Transcribing...",
@@ -37,6 +46,11 @@ const StatusIndicator: FC<{ status: Status }> = ({ status }) => {
       color: "bg-blue-500",
       icon: <Loader className="animate-spin" />,
     },
+    chatting: {
+        text: "AI is thinking...",
+        color: "bg-purple-500",
+        icon: <Loader className="animate-spin" />,
+    },
     error: { text: "Error occurred", color: "bg-red-700" },
   };
 
@@ -46,7 +60,7 @@ const StatusIndicator: FC<{ status: Status }> = ({ status }) => {
     <div className="flex items-center gap-2">
       <div className={`h-3 w-3 rounded-full ${current.color}`} />
       <span className="text-sm text-muted-foreground">{current.text}</span>
-      {status === "transcribing" || status === "analyzing" ? (
+      {current.icon ? (
         <Loader className="ml-2 h-4 w-4 animate-spin" />
       ) : null}
     </div>
@@ -136,17 +150,52 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
 
+  const [chatHistory, setChatHistory] = useState<ChatHistory>([]);
+  const [chatInput, setChatInput] = useState("");
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  const clearAll = () => {
+    setTranscript(null);
+    setEntities(null);
+    setSoapNote(null);
+    setChatHistory([]);
+    setChatInput("");
+    setStatus("idle");
+  };
+
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatHistory]);
+
+
+  const runAnalysis = useCallback(async (text: string) => {
+    setStatus("analyzing");
+    try {
+        const analysisResult = await analyzeTranscript({ transcript: text });
+        setEntities(analysisResult.entities);
+        setSoapNote(analysisResult.soapNote);
+        setStatus("idle");
+    } catch (error) {
+        console.error(error);
+        setStatus("error");
+        toast({
+            variant: "destructive",
+            title: "Analysis Failed",
+            description: "Could not analyze the transcript. Please try again.",
+        });
+    }
+  }, [toast]);
+
   const processAudio = useCallback(async (base64Audio: string) => {
+    clearAll();
     setStatus("transcribing");
     try {
       const transcriptionResult = await transcribeAudio({ audioDataUri: base64Audio });
       if (transcriptionResult.transcript) {
         setTranscript(transcriptionResult.transcript);
-        setStatus("analyzing");
-        const analysisResult = await analyzeTranscript({ transcript: transcriptionResult.transcript });
-        setEntities(analysisResult.entities);
-        setSoapNote(analysisResult.soapNote);
-        setStatus("idle");
+        await runAnalysis(transcriptionResult.transcript);
       } else {
         throw new Error("Transcription failed.");
       }
@@ -159,12 +208,10 @@ export default function Home() {
         description: "Could not process the audio. Please try again.",
       });
     }
-  }, [toast]);
+  }, [toast, runAnalysis]);
 
   const handleStartRecording = useCallback(async () => {
-    setTranscript(null);
-    setEntities(null);
-    setSoapNote(null);
+    clearAll();
     setStatus("recording");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -213,21 +260,49 @@ export default function Home() {
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      setTranscript(null);
-      setEntities(null);
-      setSoapNote(null);
+      clearAll();
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onloadend = async () => {
         const base64Audio = reader.result as string;
         await processAudio(base64Audio);
       };
-      // Reset file input
       event.target.value = "";
     }
   };
 
+  const handleChatSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || status === 'chatting') return;
+
+    const newHistory: ChatHistory = [...chatHistory, { role: "user", content: chatInput }];
+    setChatHistory(newHistory);
+    setChatInput("");
+    setStatus("chatting");
+
+    try {
+        const result = await chatWithBot({ history: newHistory });
+        setChatHistory(prev => [...prev, { role: "model", content: result.response }]);
+        const fullTranscript = [...newHistory, { role: "model", content: result.response }]
+            .map(m => `${m.role === 'user' ? 'Patient' : 'Doctor'}: ${m.content}`)
+            .join('\n');
+        setTranscript(fullTranscript);
+        await runAnalysis(fullTranscript);
+    } catch (error) {
+        console.error("Chat failed:", error);
+        setStatus("error");
+        toast({
+            variant: "destructive",
+            title: "Chatbot Error",
+            description: "The chatbot encountered an error. Please try again.",
+        });
+    }
+  };
+
   const parsedSoapNote = parseSoapNote(soapNote);
+
+  const isWorking = status === "recording" || status === "transcribing" || status === "analyzing" || status === "chatting";
+
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -238,54 +313,119 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-4">
           <StatusIndicator status={status} />
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            accept="audio/*"
-            className="hidden"
-          />
-          {status !== "recording" ? (
-            <>
-              <Button onClick={handleStartRecording} disabled={status !== "idle" && status !== "error"}>
-                <Mic className="mr-2 h-4 w-4" />
-                Start Recording
-              </Button>
-              <Button onClick={handleUploadClick} disabled={status !== "idle" && status !== "error"} variant="outline">
-                <Upload className="mr-2 h-4 w-4" />
-                Upload Audio
-              </Button>
-            </>
-          ) : (
-            <Button variant="destructive" onClick={handleStopRecording}>
-              <StopCircle className="mr-2 h-4 w-4" />
-              Stop Recording
+          {(transcript || chatHistory.length > 0) && (
+            <Button onClick={clearAll} variant="ghost" size="icon" className="h-8 w-8">
+              <Trash2 className="h-4 w-4" />
+              <span className="sr-only">Clear Session</span>
             </Button>
           )}
         </div>
       </header>
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-6 p-6 overflow-auto">
         <div className="flex flex-col gap-6">
+          <Tabs defaultValue="chat" className="flex-1 flex flex-col">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="chat">Chatbot</TabsTrigger>
+              <TabsTrigger value="audio">Audio Input</TabsTrigger>
+            </TabsList>
+            <TabsContent value="chat" className="flex-1 flex flex-col gap-4 mt-4">
+              <Card className="flex-1 flex flex-col">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Bot /> Doctor-Patient Chat</CardTitle>
+                </CardHeader>
+                <CardContent className="flex-1 flex flex-col gap-4">
+                    <ScrollArea className="flex-grow h-64 pr-4" ref={chatContainerRef}>
+                        <div className="space-y-4">
+                        {chatHistory.map((msg, index) => (
+                          <div key={index} className={cn("flex items-start gap-3", msg.role === 'user' ? 'justify-end' : '')}>
+                              {msg.role === 'model' && <Avatar><AvatarFallback><Bot /></AvatarFallback></Avatar>}
+                              <div className={cn("rounded-lg px-4 py-2 max-w-sm", msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted')}>
+                                  <p className="text-sm">{msg.content}</p>
+                              </div>
+                              {msg.role === 'user' && <Avatar><AvatarFallback><User /></AvatarFallback></Avatar>}
+                          </div>
+                        ))}
+                        {chatHistory.length === 0 && (
+                            <p className="text-muted-foreground italic text-center">Start the conversation by typing a message below.</p>
+                        )}
+                        </div>
+                    </ScrollArea>
+                    <form onSubmit={handleChatSubmit} className="flex items-center gap-2">
+                      <Textarea
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        placeholder="Type your message as the patient..."
+                        className="flex-1"
+                        rows={1}
+                        onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { handleChatSubmit(e); e.preventDefault(); } }}
+                        disabled={status === 'chatting'}
+                      />
+                      <Button type="submit" disabled={!chatInput.trim() || status === 'chatting'}>
+                        <Send className="h-4 w-4" />
+                        <span className="sr-only">Send</span>
+                      </Button>
+                    </form>
+                </CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="audio" className="flex-1 flex flex-col gap-4 mt-4">
+               <Card>
+                <CardHeader><CardTitle>Record or Upload</CardTitle></CardHeader>
+                <CardContent className="flex items-center justify-center gap-4 p-6">
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                        accept="audio/*"
+                        className="hidden"
+                      />
+                      {status !== "recording" ? (
+                        <>
+                          <Button onClick={handleStartRecording} disabled={isWorking}>
+                            <Mic className="mr-2 h-4 w-4" />
+                            Start Recording
+                          </Button>
+                          <Button onClick={handleUploadClick} disabled={isWorking} variant="outline">
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload Audio
+                          </Button>
+                        </>
+                      ) : (
+                        <Button variant="destructive" onClick={handleStopRecording}>
+                          <StopCircle className="mr-2 h-4 w-4" />
+                          Stop Recording
+                        </Button>
+                      )}
+                </CardContent>
+               </Card>
+            </TabsContent>
+          </Tabs>
+
           <Card className="flex-1">
             <CardHeader>
               <CardTitle>Conversation Transcript</CardTitle>
             </CardHeader>
             <CardContent>
-              {status === 'transcribing' || status === 'analyzing' || (transcript && (status === 'idle' || status === 'error')) ? (
+              {isWorking && !transcript ? (
+                <div className="space-y-2">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-3/4" />
+                </div>
+              ) : transcript ? (
                 <div
                   className="prose prose-sm max-w-none text-foreground"
-                  dangerouslySetInnerHTML={highlightText(transcript || "Analyzing transcript...", entities)}
+                  dangerouslySetInnerHTML={highlightText(transcript, entities)}
                 />
-              ) : status === 'recording' ? (
-                <p className="text-muted-foreground italic">Recording in progress...</p>
               ) : (
                 <p className="text-muted-foreground italic">
-                  Click &quot;Start Recording&quot; or &quot;Upload Audio&quot; to begin a session.
+                  Start a session to see the transcript.
                 </p>
               )}
             </CardContent>
           </Card>
-          
+        </div>
+
+        <div className="flex flex-col gap-6">
           <Card>
             <CardHeader>
               <CardTitle>Extracted Medical Entities</CardTitle>
@@ -322,42 +462,42 @@ export default function Home() {
               )}
             </CardContent>
           </Card>
-        </div>
 
-        <Card className="lg:max-h-[calc(100vh-10rem)] overflow-y-auto">
-          <CardHeader>
-            <CardTitle>Generated SOAP Note</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {status === 'analyzing' ? (<div className="space-y-6">
-              <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /></div>
-              <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" /></div>
-              <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /></div>
-              <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-1/2" /></div>
-            </div>) : soapNote ? (
-              <>
-                <div className="space-y-1">
-                  <h3 className="font-bold text-lg text-primary">Subjective (S)</h3>
-                  <p className="prose prose-sm max-w-none text-foreground">{parsedSoapNote.S || "No subjective information generated."}</p>
-                </div>
-                <div className="space-y-1">
-                  <h3 className="font-bold text-lg text-primary">Objective (O)</h3>
-                  <p className="prose prose-sm max-w-none text-foreground">{parsedSoapNote.O || "No objective information generated."}</p>
-                </div>
-                <div className="space-y-1">
-                  <h3 className="font-bold text-lg text-primary">Assessment (A)</h3>
-                  <p className="prose prose-sm max-w-none text-foreground">{parsedSoapNote.A || "No assessment generated."}</p>
-                </div>
-                <div className="space-y-1">
-                  <h3 className="font-bold text-lg text-primary">Plan (P)</h3>
-                  <p className="prose prose-sm max-w-none text-foreground">{parsedSoapNote.P || "No plan generated."}</p>
-                </div>
-              </>
-            ) : (
-               <p className="text-muted-foreground italic">SOAP note will be generated after transcription and analysis.</p>
-            )}
-          </CardContent>
-        </Card>
+          <Card className="flex-1 lg:max-h-[calc(100vh-18rem)] overflow-y-auto">
+            <CardHeader>
+              <CardTitle>Generated SOAP Note</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {status === 'analyzing' ? (<div className="space-y-6">
+                <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /></div>
+                <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" /></div>
+                <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /></div>
+                <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-1/2" /></div>
+              </div>) : soapNote ? (
+                <>
+                  <div className="space-y-1">
+                    <h3 className="font-bold text-lg text-primary">Subjective (S)</h3>
+                    <p className="prose prose-sm max-w-none text-foreground">{parsedSoapNote.S || "No subjective information generated."}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="font-bold text-lg text-primary">Objective (O)</h3>
+                    <p className="prose prose-sm max-w-none text-foreground">{parsedSoapNote.O || "No objective information generated."}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="font-bold text-lg text-primary">Assessment (A)</h3>
+                    <p className="prose prose-sm max-w-none text-foreground">{parsedSoapNote.A || "No assessment generated."}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="font-bold text-lg text-primary">Plan (P)</h3>
+                    <p className="prose prose-sm max-w-none text-foreground">{parsedSoapNote.P || "No plan generated."}</p>
+                  </div>
+                </>
+              ) : (
+                 <p className="text-muted-foreground italic">SOAP note will be generated after transcription and analysis.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </main>
     </div>
   );
