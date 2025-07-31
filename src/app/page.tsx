@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import type { FC } from "react";
+import type { FC, ChangeEvent } from "react";
 import {
   Mic,
   StopCircle,
@@ -10,6 +10,7 @@ import {
   Pill,
   ClipboardList,
   Stethoscope,
+  Upload,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -132,7 +133,33 @@ export default function Home() {
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
+
+  const processAudio = useCallback(async (base64Audio: string) => {
+    setStatus("transcribing");
+    try {
+      const transcriptionResult = await transcribeAudio({ audioDataUri: base64Audio });
+      if (transcriptionResult.transcript) {
+        setTranscript(transcriptionResult.transcript);
+        setStatus("analyzing");
+        const analysisResult = await analyzeTranscript({ transcript: transcriptionResult.transcript });
+        setEntities(analysisResult.entities);
+        setSoapNote(analysisResult.soapNote);
+        setStatus("idle");
+      } else {
+        throw new Error("Transcription failed.");
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus("error");
+      toast({
+        variant: "destructive",
+        title: "AI Analysis Failed",
+        description: "Could not process the audio. Please try again.",
+      });
+    }
+  }, [toast]);
 
   const handleStartRecording = useCallback(async () => {
     setTranscript(null);
@@ -141,12 +168,11 @@ export default function Home() {
     setStatus("recording");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder.current = new MediaRecorder(stream);
+      mediaRecorder.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       mediaRecorder.current.ondataavailable = event => {
         audioChunks.current.push(event.data);
       };
       mediaRecorder.current.onstop = async () => {
-        setStatus("transcribing");
         const audioBlob = new Blob(audioChunks.current, {
           type: "audio/webm",
         });
@@ -155,27 +181,7 @@ export default function Home() {
         reader.readAsDataURL(audioBlob);
         reader.onloadend = async () => {
           const base64Audio = reader.result as string;
-          try {
-            const transcriptionResult = await transcribeAudio({ audioDataUri: base64Audio });
-            if (transcriptionResult.transcript) {
-              setTranscript(transcriptionResult.transcript);
-              setStatus("analyzing");
-              const analysisResult = await analyzeTranscript({ transcript: transcriptionResult.transcript });
-              setEntities(analysisResult.entities);
-              setSoapNote(analysisResult.soapNote);
-              setStatus("idle");
-            } else {
-              throw new Error("Transcription failed.");
-            }
-          } catch (error) {
-            console.error(error);
-            setStatus("error");
-            toast({
-              variant: "destructive",
-              title: "AI Analysis Failed",
-              description: "Could not process the audio. Please try again.",
-            });
-          }
+          await processAudio(base64Audio);
         };
       };
       mediaRecorder.current.start();
@@ -189,7 +195,7 @@ export default function Home() {
           "Please allow microphone access in your browser settings to use this feature.",
       });
     }
-  }, [toast]);
+  }, [toast, processAudio]);
 
   const handleStopRecording = useCallback(() => {
     if (
@@ -199,6 +205,27 @@ export default function Home() {
       mediaRecorder.current.stop();
     }
   }, []);
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setTranscript(null);
+      setEntities(null);
+      setSoapNote(null);
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onloadend = async () => {
+        const base64Audio = reader.result as string;
+        await processAudio(base64Audio);
+      };
+      // Reset file input
+      event.target.value = "";
+    }
+  };
 
   const parsedSoapNote = parseSoapNote(soapNote);
 
@@ -211,11 +238,24 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-4">
           <StatusIndicator status={status} />
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept="audio/*"
+            className="hidden"
+          />
           {status !== "recording" ? (
-            <Button onClick={handleStartRecording} disabled={status !== "idle" && status !== "error"}>
-              <Mic className="mr-2 h-4 w-4" />
-              Start Recording
-            </Button>
+            <>
+              <Button onClick={handleStartRecording} disabled={status !== "idle" && status !== "error"}>
+                <Mic className="mr-2 h-4 w-4" />
+                Start Recording
+              </Button>
+              <Button onClick={handleUploadClick} disabled={status !== "idle" && status !== "error"} variant="outline">
+                <Upload className="mr-2 h-4 w-4" />
+                Upload Audio
+              </Button>
+            </>
           ) : (
             <Button variant="destructive" onClick={handleStopRecording}>
               <StopCircle className="mr-2 h-4 w-4" />
@@ -240,7 +280,7 @@ export default function Home() {
                 <p className="text-muted-foreground italic">Recording in progress...</p>
               ) : (
                 <p className="text-muted-foreground italic">
-                  Click &quot;Start Recording&quot; to begin a session.
+                  Click &quot;Start Recording&quot; or &quot;Upload Audio&quot; to begin a session.
                 </p>
               )}
             </CardContent>
