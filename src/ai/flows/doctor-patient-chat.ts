@@ -29,7 +29,7 @@ export type DoctorPatientChatOutput = z.infer<
   typeof DoctorPatientChatOutputSchema
 >;
 
-export async function doctorPatientChat(
+async function doctorPatientChatFlow(
   input: DoctorPatientChatInput
 ): Promise<DoctorPatientChatOutput> {
   const systemPrompt = `You are a compassionate and knowledgeable doctor. Your role is to converse with a patient (the user) to understand their symptoms and concerns. Be professional, empathetic, and clear in your communication. Ask clarifying questions to gather necessary medical information. The user is the patient.`;
@@ -37,14 +37,14 @@ export async function doctorPatientChat(
   if (input.history.length === 0) {
     return { response: "Hello, how can I help you today?" };
   }
-
+  
   const llmResponse = await generate({
     model: 'googleai/gemini-pro',
     history: [
       { role: 'system', content: systemPrompt },
       ...input.history,
     ],
-    prompt: '', // The last message is the prompt, but it's already in history
+    prompt: '', // The last message from the user is already in the history array
     output: {
       schema: z.object({
         response: z.string(),
@@ -53,6 +53,7 @@ export async function doctorPatientChat(
   });
 
   const output = llmResponse.output();
+
   if (!output) {
     throw new Error("No output from LLM");
   }
@@ -62,13 +63,20 @@ export async function doctorPatientChat(
   };
 }
 
-// Keep the flow definition but the exported function above is what will be used.
-// This maintains consistency in the AI flow definitions.
+// Export the function to be used in server actions
+export async function doctorPatientChat(
+  input: DoctorPatientChatInput
+): Promise<DoctorPatientChatOutput> {
+    return doctorPatientChatFlow(input);
+}
+
+
+// Define the flow for consistency, though the above function is what's directly used.
 ai.defineFlow(
   {
     name: 'doctorPatientChatFlow',
     inputSchema: DoctorPatientChatInputSchema,
     outputSchema: DoctorPatientChatOutputSchema,
   },
-  doctorPatientChat
+  doctorPatientChatFlow
 );
