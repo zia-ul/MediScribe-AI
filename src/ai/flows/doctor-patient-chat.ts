@@ -46,12 +46,11 @@ const doctorPatientChatFlow = ai.defineFlow(
   async (input) => {
     const llmResponse = await generate({
       model: 'googleai/gemini-pro',
+      history: [
+        { role: 'system', content: systemPrompt },
+        ...input.history,
+      ],
       prompt: input.history[input.history.length - 1].content,
-      history: input.history.slice(0, -1),
-      config: {
-        // @ts-ignore
-        systemInstruction: systemPrompt,
-      },
       output: {
         schema: z.object({
           response: z.string(),
