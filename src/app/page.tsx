@@ -151,6 +151,8 @@ export default function Home() {
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
+  const audioStream = useRef<MediaStream | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
 
@@ -174,7 +176,10 @@ export default function Home() {
   useEffect(() => {
     const getMicPermission = async () => {
       try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // We have permission, but we don't need to hold on to the stream yet.
+        // We'll request it again when recording starts.
+        stream.getTracks().forEach(track => track.stop());
         setHasMicPermission(true);
       } catch (error) {
         console.error("Error accessing microphone:", error);
@@ -286,34 +291,40 @@ export default function Home() {
     audioChunks.current = [];
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder.current = new MediaRecorder(stream);
+      audioStream.current = stream;
+      const recorder = new MediaRecorder(stream);
+      mediaRecorder.current = recorder;
       
-      mediaRecorder.current.addEventListener("dataavailable", (event) => {
+      recorder.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) {
           audioChunks.current.push(event.data);
         }
       });
 
-      mediaRecorder.current.addEventListener("stop", () => {
-        const audioBlob = new Blob(audioChunks.current, { type: mediaRecorder.current?.mimeType });
+      recorder.addEventListener("stop", () => {
+        const audioBlob = new Blob(audioChunks.current, { type: recorder.mimeType });
         const audioUrl = URL.createObjectURL(audioBlob);
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
           const base64Audio = reader.result as string;
           processAudio(base64Audio, audioUrl);
-          stream.getTracks().forEach(track => track.stop());
+          // Stop the stream tracks after processing is complete
+          if (audioStream.current) {
+            audioStream.current.getTracks().forEach(track => track.stop());
+            audioStream.current = null;
+          }
         };
       });
 
-      mediaRecorder.current.start();
+      recorder.start();
     } catch (error) {
-      console.error("Error accessing microphone:", error);
+      console.error("Error starting recording:", error);
       setStatus("error");
       toast({
         variant: "destructive",
-        title: "Microphone Access Denied",
-        description: "Please allow microphone access in your browser settings to use this feature.",
+        title: "Recording Failed",
+        description: "Could not start recording. Please check your microphone settings.",
       });
     }
   }, [toast, processAudio, hasMicPermission]);
@@ -570,7 +581,7 @@ export default function Home() {
             <CardContent className="space-y-4">
               {(isWorking && !soapNote) || (status === 'analyzing') ? (<div className="space-y-6">
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /></div>
-                <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" /></div>
+                <div><Skeleton className="h-6 w-1/qa mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" /></div>
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /></div>
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-1/2" /></div>
               </div>) : soapNote ? (
