@@ -287,11 +287,12 @@ export default function Home() {
       return;
     }
     clearAll();
-    setStatus("recording");
-    audioChunks.current = [];
+    
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioStream.current = stream;
+      audioChunks.current = [];
+      
       const recorder = new MediaRecorder(stream);
       mediaRecorder.current = recorder;
       
@@ -318,6 +319,8 @@ export default function Home() {
       });
 
       recorder.start();
+      setStatus("recording");
+
     } catch (error) {
       console.error("Error starting recording:", error);
       setStatus("error");
@@ -335,6 +338,7 @@ export default function Home() {
       mediaRecorder.current.state === "recording"
     ) {
       mediaRecorder.current.stop();
+      // Status will be updated by the processAudio call chain
     }
   }, []);
 
