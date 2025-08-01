@@ -145,6 +145,7 @@ export default function Home() {
     null
   );
   const [soapNote, setSoapNote] = useState<string | null>(null);
+  const [audioURL, setAudioURL] = useState<string | null>(null);
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -171,7 +172,10 @@ export default function Home() {
     setTranscript(null);
     setEntities(null);
     setSoapNote(null);
-    setChatHistory([]);
+    setAudioURL(null);
+    if (chatHistory.length > 0) {
+      setChatHistory([]);
+    }
     setChatInput("");
     setStatus("idle");
   };
@@ -215,8 +219,15 @@ export default function Home() {
     runInitialAnalysis();
   }, []);
 
-  const processAudio = useCallback(async (base64Audio: string) => {
-    clearAll();
+  const processAudio = useCallback(async (base64Audio: string, audioBlobUrl: string) => {
+    setAudioURL(audioBlobUrl);
+    setTranscript(null);
+    setEntities(null);
+    setSoapNote(null);
+    if (chatHistory.length > 0) {
+      setChatHistory([]);
+    }
+
     setStatus("transcribing");
     try {
       const transcriptionResult = await transcribeAudio({ audioDataUri: base64Audio });
@@ -235,7 +246,7 @@ export default function Home() {
         description: "Could not process the audio. Please try again.",
       });
     }
-  }, [toast, runAnalysis]);
+  }, [toast, runAnalysis, chatHistory.length]);
 
   const handleStartRecording = useCallback(async () => {
     clearAll();
@@ -250,12 +261,13 @@ export default function Home() {
         const audioBlob = new Blob(audioChunks.current, {
           type: "audio/webm",
         });
+        const audioUrl = URL.createObjectURL(audioBlob);
         audioChunks.current = [];
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = async () => {
           const base64Audio = reader.result as string;
-          await processAudio(base64Audio);
+          await processAudio(base64Audio, audioUrl);
         };
       };
       mediaRecorder.current.start();
@@ -288,11 +300,12 @@ export default function Home() {
     const file = event.target.files?.[0];
     if (file) {
       clearAll();
+      const audioUrl = URL.createObjectURL(file);
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onloadend = async () => {
         const base64Audio = reader.result as string;
-        await processAudio(base64Audio);
+        await processAudio(base64Audio, audioUrl);
       };
       event.target.value = "";
     }
@@ -340,7 +353,7 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-4">
           <StatusIndicator status={status} />
-          {(transcript || chatHistory.length > 0) && (
+          {(transcript || chatHistory.length > 0 || audioURL) && (
             <Button onClick={clearAll} variant="ghost" size="icon" className="h-8 w-8">
               <Trash2 className="h-4 w-4" />
               <span className="sr-only">Clear Session</span>
@@ -372,7 +385,7 @@ export default function Home() {
                               {msg.role === 'user' && <Avatar><AvatarFallback><User /></AvatarFallback></Avatar>}
                           </div>
                         ))}
-                        {chatHistory.length === 0 && (
+                        {status !== 'chatting' && chatHistory.length === 0 && (
                             <p className="text-muted-foreground italic text-center">Start the conversation by typing a message below.</p>
                         )}
                         </div>
@@ -398,7 +411,7 @@ export default function Home() {
             <TabsContent value="audio" className="flex-1 flex flex-col gap-4 mt-4">
                <Card>
                 <CardHeader><CardTitle>Record or Upload</CardTitle></CardHeader>
-                <CardContent className="flex items-center justify-center gap-4 p-6">
+                <CardContent className="flex flex-col items-center justify-center gap-4 p-6">
                     <input
                         type="file"
                         ref={fileInputRef}
@@ -407,7 +420,7 @@ export default function Home() {
                         className="hidden"
                       />
                       {status !== "recording" ? (
-                        <>
+                        <div className="flex items-center justify-center gap-4">
                           <Button onClick={handleStartRecording} disabled={isWorking}>
                             <Mic className="mr-2 h-4 w-4" />
                             Start Recording
@@ -416,12 +429,18 @@ export default function Home() {
                             <Upload className="mr-2 h-4 w-4" />
                             Upload Audio
                           </Button>
-                        </>
+                        </div>
                       ) : (
                         <Button variant="destructive" onClick={handleStopRecording}>
                           <StopCircle className="mr-2 h-4 w-4" />
                           Stop Recording
                         </Button>
+                      )}
+                      {audioURL && (
+                          <div className="w-full pt-4">
+                              <h4 className="text-sm font-medium mb-2 text-center">Captured Audio</h4>
+                              <audio src={audioURL} controls className="w-full" />
+                          </div>
                       )}
                 </CardContent>
                </Card>
@@ -529,3 +548,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
