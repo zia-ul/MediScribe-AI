@@ -217,7 +217,7 @@ export default function Home() {
       }
     };
     runInitialAnalysis();
-  }, []);
+  }, [runAnalysis]);
 
   const processAudio = useCallback(async (base64Audio: string, audioBlobUrl: string) => {
     setAudioURL(audioBlobUrl);
@@ -250,19 +250,21 @@ export default function Home() {
 
   const handleStartRecording = useCallback(async () => {
     clearAll();
+    audioChunks.current = [];
     setStatus("recording");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorder.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       mediaRecorder.current.ondataavailable = event => {
-        audioChunks.current.push(event.data);
+        if (event.data.size > 0) {
+          audioChunks.current.push(event.data);
+        }
       };
-      mediaRecorder.current.onstop = async () => {
+      mediaRecorder.current.onstop = () => {
         const audioBlob = new Blob(audioChunks.current, {
           type: "audio/webm",
         });
         const audioUrl = URL.createObjectURL(audioBlob);
-        audioChunks.current = [];
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = async () => {
@@ -336,6 +338,8 @@ export default function Home() {
             title: "Chatbot Error",
             description: "The chatbot encountered an error. Please try again.",
         });
+    } finally {
+        setStatus("idle");
     }
   };
 
@@ -385,6 +389,14 @@ export default function Home() {
                               {msg.role === 'user' && <Avatar><AvatarFallback><User /></AvatarFallback></Avatar>}
                           </div>
                         ))}
+                        {status === 'chatting' && (
+                            <div className="flex items-start gap-3">
+                                <Avatar><AvatarFallback><Bot /></AvatarFallback></Avatar>
+                                <div className="rounded-lg px-4 py-2 max-w-sm bg-muted flex items-center">
+                                    <Loader className="h-5 w-5 animate-spin" />
+                                </div>
+                            </div>
+                        )}
                         {status !== 'chatting' && chatHistory.length === 0 && (
                             <p className="text-muted-foreground italic text-center">Start the conversation by typing a message below.</p>
                         )}
@@ -452,8 +464,9 @@ export default function Home() {
               <CardTitle>Conversation Transcript</CardTitle>
             </CardHeader>
             <CardContent>
-              {isWorking && !transcript ? (
+              {(isWorking && !transcript) || (status === 'transcribing') ? (
                 <div className="space-y-2">
+                    <Skeleton className="h-4 w-full" />
                     <Skeleton className="h-4 w-full" />
                     <Skeleton className="h-4 w-3/4" />
                 </div>
@@ -477,7 +490,7 @@ export default function Home() {
               <CardTitle>Extracted Medical Entities</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {status === 'analyzing' && !entities ? (<div className="space-y-4">
+              {(isWorking && !entities) || (status === 'analyzing') ? (<div className="space-y-4">
                 <Skeleton className="h-8 w-1/3" />
                 <div className="flex flex-wrap gap-2"><Skeleton className="h-6 w-20 rounded-full" /><Skeleton className="h-6 w-24 rounded-full" /></div>
                 <Skeleton className="h-8 w-1/3" />
@@ -514,7 +527,7 @@ export default function Home() {
               <CardTitle>Generated SOAP Note</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {status === 'analyzing' && !soapNote ? (<div className="space-y-6">
+              {(isWorking && !soapNote) || (status === 'analyzing') ? (<div className="space-y-6">
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /></div>
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" /></div>
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /></div>
@@ -548,5 +561,3 @@ export default function Home() {
     </div>
   );
 }
-
-    

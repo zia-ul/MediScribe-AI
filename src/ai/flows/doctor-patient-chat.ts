@@ -49,7 +49,7 @@ async function doctorPatientChatFlow(
       history: input.history,
   });
 
-  const output = llmResponse.output();
+  const output = llmResponse.output;
 
   if (!output) {
     throw new Error("No output from LLM");
@@ -60,15 +60,12 @@ async function doctorPatientChatFlow(
   };
 }
 
-// Export the function to be used in server actions
 export async function doctorPatientChat(
   input: DoctorPatientChatInput
 ): Promise<DoctorPatientChatOutput> {
     return doctorPatientChatFlow(input);
 }
 
-
-// Define the flow for consistency, though the above function is what's directly used.
 ai.defineFlow(
   {
     name: 'doctorPatientChatFlow',
