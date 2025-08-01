@@ -31,6 +31,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { ChatHistory } from "@/ai/flows/doctor-patient-chat";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
 type Status = "idle" | "recording" | "transcribing" | "analyzing" | "error" | "chatting";
 
@@ -148,6 +150,9 @@ export default function Home() {
   const [soapNote, setSoapNote] = useState<string | null>(null);
   const [audioURL, setAudioURL] = useState<string | null>(null);
   const [hasMicPermission, setHasMicPermission] = useState(false);
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -173,11 +178,20 @@ export default function Home() {
     setStatus("idle");
   };
 
-  useEffect(() => {
+    useEffect(() => {
     const getMicPermission = async () => {
       try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         setHasMicPermission(true);
+        stream.getTracks().forEach(track => track.stop()); // Stop the initial stream
+        
+        // Enumerate devices
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputDevices = devices.filter(device => device.kind === 'audioinput');
+        setAudioDevices(audioInputDevices);
+        if (audioInputDevices.length > 0) {
+          setSelectedDeviceId(audioInputDevices[0].deviceId);
+        }
       } catch (error) {
         console.error("Error accessing microphone:", error);
         setHasMicPermission(false);
@@ -286,7 +300,12 @@ export default function Home() {
     clearAll();
     
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const constraints = {
+        audio: {
+            deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined
+        }
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       audioStream.current = stream;
       audioChunks.current = [];
       
@@ -300,7 +319,7 @@ export default function Home() {
       };
 
       recorder.onstop = () => {
-        const audioBlob = new Blob(audioChunks.current, { type: mediaRecorder.current?.mimeType });
+        const audioBlob = new Blob(audioChunks.current, { type: mediaRecorder.current?.mimeType || 'audio/webm' });
         const audioUrl = URL.createObjectURL(audioBlob);
         
         const reader = new FileReader();
@@ -308,13 +327,12 @@ export default function Home() {
         reader.onloadend = () => {
           const base64Audio = reader.result as string;
           processAudio(base64Audio, audioUrl);
+          
+          if (audioStream.current) {
+            audioStream.current.getTracks().forEach(track => track.stop());
+            audioStream.current = null;
+          }
         };
-        
-        // Stop the stream tracks after processing is initiated
-        if (audioStream.current) {
-          audioStream.current.getTracks().forEach(track => track.stop());
-          audioStream.current = null;
-        }
       };
 
       recorder.start();
@@ -329,7 +347,7 @@ export default function Home() {
         description: "Could not start recording. Please check your microphone settings.",
       });
     }
-  }, [toast, processAudio, hasMicPermission]);
+  }, [toast, processAudio, hasMicPermission, selectedDeviceId]);
 
   const handleStopRecording = useCallback(() => {
     if (
@@ -337,7 +355,6 @@ export default function Home() {
       mediaRecorder.current.state === "recording"
     ) {
       mediaRecorder.current.stop();
-      // Status will be updated by the processAudio call chain
     }
   }, []);
 
@@ -479,6 +496,23 @@ export default function Home() {
                         </AlertDescription>
                       </Alert>
                     )}
+                    {hasMicPermission && (
+                      <div className="w-full space-y-2">
+                        <Label htmlFor="audio-device">Microphone</Label>
+                        <Select value={selectedDeviceId} onValueChange={setSelectedDeviceId} disabled={status === 'recording'}>
+                          <SelectTrigger id="audio-device">
+                            <SelectValue placeholder="Select an audio device" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {audioDevices.map(device => (
+                              <SelectItem key={device.deviceId} value={device.deviceId}>
+                                {device.label || `Microphone ${audioDevices.indexOf(device) + 1}`}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <input
                         type="file"
                         ref={fileInputRef}
@@ -487,7 +521,7 @@ export default function Home() {
                         className="hidden"
                       />
                       {status !== "recording" ? (
-                        <div className="flex items-center justify-center gap-4">
+                        <div className="flex items-center justify-center gap-4 pt-4">
                           <Button onClick={handleStartRecording} disabled={isWorking || !hasMicPermission}>
                             <Mic className="mr-2 h-4 w-4" />
                             Start Recording
@@ -498,7 +532,7 @@ export default function Home() {
                           </Button>
                         </div>
                       ) : (
-                        <Button variant="destructive" onClick={handleStopRecording}>
+                        <Button variant="destructive" onClick={handleStopRecording} className="mt-4">
                           <StopCircle className="mr-2 h-4 w-4" />
                           Stop Recording
                         </Button>
