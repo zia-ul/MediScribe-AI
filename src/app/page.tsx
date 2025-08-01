@@ -15,13 +15,14 @@ import {
   User,
   Send,
   Trash2,
+  Play,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { analyzeTranscript, transcribeAudio, chatWithBot } from "@/app/actions";
+import { analyzeTranscript, transcribeAudio, chatWithBot, convertTextToSpeech } from "@/app/actions";
 import type { ExtractMedicalEntitiesOutput } from "@/ai/flows/extract-medical-entities";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,7 +35,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
-type Status = "idle" | "recording" | "transcribing" | "analyzing" | "error" | "chatting";
+type Status = "idle" | "recording" | "transcribing" | "analyzing" | "error" | "chatting" | "speaking";
 
 const StatusIndicator: FC<{ status: Status }> = ({ status }) => {
   const statusConfig = {
@@ -43,28 +44,30 @@ const StatusIndicator: FC<{ status: Status }> = ({ status }) => {
     transcribing: {
       text: "Transcribing...",
       color: "bg-yellow-500",
-      icon: <Loader className="animate-spin" />,
     },
     analyzing: {
       text: "Analyzing...",
       color: "bg-blue-500",
-      icon: <Loader className="animate-spin" />,
+    },
+    speaking: {
+        text: "Generating audio...",
+        color: "bg-green-500",
     },
     chatting: {
         text: "AI is thinking...",
         color: "bg-purple-500",
-        icon: <Loader className="animate-spin" />,
     },
     error: { text: "Error occurred", color: "bg-red-700" },
   };
 
   const current = statusConfig[status];
+  const showLoader = status === 'transcribing' || status === 'analyzing' || status === 'chatting' || status === 'speaking';
 
   return (
     <div className="flex items-center gap-2">
       <div className={`h-3 w-3 rounded-full ${current.color}`} />
       <span className="text-sm text-muted-foreground">{current.text}</span>
-      {current.icon ? (
+      {showLoader ? (
         <Loader className="ml-2 h-4 w-4 animate-spin" />
       ) : null}
     </div>
@@ -166,11 +169,15 @@ export default function Home() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
 
+  const [playbackAudioUrl, setPlaybackAudioUrl] = useState<string | null>(null);
+  const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+
   const clearAll = () => {
     setTranscript(null);
     setEntities(null);
     setSoapNote(null);
     setAudioURL(null);
+    setPlaybackAudioUrl(null);
     if (chatHistory.length > 0) {
       setChatHistory([]);
     }
@@ -181,9 +188,10 @@ export default function Home() {
     useEffect(() => {
     const getMicPermission = async () => {
       try {
+        // Just to request permission
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         setHasMicPermission(true);
-        stream.getTracks().forEach(track => track.stop()); // Stop the initial stream
+        stream.getTracks().forEach(track => track.stop());
         
         // Enumerate devices
         const devices = await navigator.mediaDevices.enumerateDevices();
@@ -210,6 +218,12 @@ export default function Home() {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatHistory]);
+
+  useEffect(() => {
+    if (playbackAudioUrl && playbackAudioRef.current) {
+      playbackAudioRef.current.play();
+    }
+  }, [playbackAudioUrl]);
 
 
   const runAnalysis = useCallback(async (text: string) => {
@@ -289,8 +303,8 @@ export default function Home() {
   }, [toast, runAnalysis, chatHistory.length]);
 
   const handleStartRecording = useCallback(async () => {
-    if (!hasMicPermission) {
-      toast({
+    if (status === 'recording' || !hasMicPermission) {
+        toast({
           variant: "destructive",
           title: "Microphone Access Required",
           description: "Please allow microphone access to record audio.",
@@ -300,18 +314,15 @@ export default function Home() {
     clearAll();
     
     try {
-      const constraints = {
-        audio: {
-            deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined
-        }
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      audioStream.current = stream;
+      audioStream.current = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined }
+      });
+
+      setStatus("recording");
       audioChunks.current = [];
-      
-      const recorder = new MediaRecorder(stream);
+      const recorder = new MediaRecorder(audioStream.current);
       mediaRecorder.current = recorder;
-      
+
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunks.current.push(event.data);
@@ -319,7 +330,7 @@ export default function Home() {
       };
 
       recorder.onstop = () => {
-        const audioBlob = new Blob(audioChunks.current, { type: mediaRecorder.current?.mimeType || 'audio/webm' });
+        const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
         const audioUrl = URL.createObjectURL(audioBlob);
         
         const reader = new FileReader();
@@ -327,16 +338,12 @@ export default function Home() {
         reader.onloadend = () => {
           const base64Audio = reader.result as string;
           processAudio(base64Audio, audioUrl);
-          
-          if (audioStream.current) {
-            audioStream.current.getTracks().forEach(track => track.stop());
-            audioStream.current = null;
-          }
         };
+        
+        audioStream.current?.getTracks().forEach(track => track.stop());
       };
-
+      
       recorder.start();
-      setStatus("recording");
 
     } catch (error) {
       console.error("Error starting recording:", error);
@@ -347,13 +354,10 @@ export default function Home() {
         description: "Could not start recording. Please check your microphone settings.",
       });
     }
-  }, [toast, processAudio, hasMicPermission, selectedDeviceId]);
+  }, [status, hasMicPermission, processAudio, selectedDeviceId, toast]);
 
   const handleStopRecording = useCallback(() => {
-    if (
-      mediaRecorder.current &&
-      mediaRecorder.current.state === "recording"
-    ) {
+    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
       mediaRecorder.current.stop();
     }
   }, []);
@@ -406,10 +410,30 @@ export default function Home() {
         setStatus("idle");
     }
   };
+  
+  const handlePlayback = async () => {
+    if (!transcript || status === 'speaking') return;
+
+    setStatus('speaking');
+    try {
+        const result = await convertTextToSpeech({ text: transcript });
+        setPlaybackAudioUrl(result.audioDataUri);
+    } catch (error) {
+        console.error("TTS failed:", error);
+        setStatus("error");
+        toast({
+            variant: "destructive",
+            title: "Playback Failed",
+            description: "Could not generate audio for the transcript.",
+        });
+    } finally {
+        setStatus("idle");
+    }
+  };
 
   const parsedSoapNote = parseSoapNote(soapNote);
 
-  const isWorking = status === "recording" || status === "transcribing" || status === "analyzing" || status === "chatting";
+  const isWorking = status === "recording" || status === "transcribing" || status === "analyzing" || status === "chatting" || status === "speaking";
 
 
   return (
@@ -549,11 +573,17 @@ export default function Home() {
           </Tabs>
 
           <Card className="flex-1">
-            <CardHeader>
+             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Conversation Transcript</CardTitle>
+              {transcript && (
+                <Button onClick={handlePlayback} variant="outline" size="sm" disabled={isWorking}>
+                    <Play className="mr-2 h-4 w-4" />
+                    Playback
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
-              {(isWorking && !transcript) || (status === 'transcribing') ? (
+              {isWorking && !transcript ? (
                 <div className="space-y-2">
                     <Skeleton className="h-4 w-full" />
                     <Skeleton className="h-4 w-full" />
@@ -579,7 +609,7 @@ export default function Home() {
               <CardTitle>Extracted Medical Entities</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {(isWorking && !entities) || (status === 'analyzing') ? (<div className="space-y-4">
+              {(isWorking && !entities) || (status === 'analyzing' && transcript) ? (<div className="space-y-4">
                 <Skeleton className="h-8 w-1/3" />
                 <div className="flex flex-wrap gap-2"><Skeleton className="h-6 w-20 rounded-full" /><Skeleton className="h-6 w-24 rounded-full" /></div>
                 <Skeleton className="h-8 w-1/3" />
@@ -616,9 +646,9 @@ export default function Home() {
               <CardTitle>Generated SOAP Note</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {(isWorking && !soapNote) || (status === 'analyzing') ? (<div className="space-y-6">
+              {(isWorking && !soapNote) || (status === 'analyzing' && transcript) ? (<div className="space-y-6">
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /></div>
-                <div><Skeleton className="h-6 w-1/qa mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" /></div>
+                <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" /></div>
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /></div>
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-1/2" /></div>
               </div>) : soapNote ? (
@@ -647,6 +677,14 @@ export default function Home() {
           </Card>
         </div>
       </main>
+      {playbackAudioUrl && (
+        <audio
+          ref={playbackAudioRef}
+          src={playbackAudioUrl}
+          onEnded={() => setPlaybackAudioUrl(null)}
+          hidden
+        />
+      )}
     </div>
   );
 }
