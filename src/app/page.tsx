@@ -30,6 +30,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { ChatHistory } from "@/ai/flows/doctor-patient-chat";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 type Status = "idle" | "recording" | "transcribing" | "analyzing" | "error" | "chatting";
 
@@ -146,6 +147,7 @@ export default function Home() {
   );
   const [soapNote, setSoapNote] = useState<string | null>(null);
   const [audioURL, setAudioURL] = useState<string | null>(null);
+  const [hasMicPermission, setHasMicPermission] = useState(false);
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -168,6 +170,24 @@ export default function Home() {
     setChatInput("");
     setStatus("idle");
   };
+
+  useEffect(() => {
+    const getMicPermission = async () => {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        setHasMicPermission(true);
+      } catch (error) {
+        console.error("Error accessing microphone:", error);
+        setHasMicPermission(false);
+        toast({
+          variant: "destructive",
+          title: "Microphone Access Denied",
+          description: "Please allow microphone access in your browser settings to use this feature.",
+        });
+      }
+    };
+    getMicPermission();
+  }, [toast]);
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -253,6 +273,14 @@ export default function Home() {
   }, [toast, runAnalysis, chatHistory.length]);
 
   const handleStartRecording = useCallback(async () => {
+    if (!hasMicPermission) {
+      toast({
+          variant: "destructive",
+          title: "Microphone Access Required",
+          description: "Please allow microphone access to record audio.",
+        });
+      return;
+    }
     clearAll();
     setStatus("recording");
     audioChunks.current = [];
@@ -261,7 +289,9 @@ export default function Home() {
       mediaRecorder.current = new MediaRecorder(stream, { mimeType: "audio/webm" });
       
       mediaRecorder.current.addEventListener("dataavailable", (event) => {
-        audioChunks.current.push(event.data);
+        if (event.data.size > 0) {
+          audioChunks.current.push(event.data);
+        }
       });
 
       mediaRecorder.current.addEventListener("stop", () => {
@@ -286,7 +316,7 @@ export default function Home() {
         description: "Please allow microphone access in your browser settings to use this feature.",
       });
     }
-  }, [toast, processAudio]);
+  }, [toast, processAudio, hasMicPermission]);
 
   const handleStopRecording = useCallback(() => {
     if (
@@ -427,6 +457,14 @@ export default function Home() {
                <Card>
                 <CardHeader><CardTitle>Record or Upload</CardTitle></CardHeader>
                 <CardContent className="flex flex-col items-center justify-center gap-4 p-6">
+                    {!hasMicPermission && (
+                      <Alert variant="destructive">
+                        <AlertTitle>Microphone Access Required</AlertTitle>
+                        <AlertDescription>
+                          Please allow microphone access in your browser settings to use the recording feature.
+                        </AlertDescription>
+                      </Alert>
+                    )}
                     <input
                         type="file"
                         ref={fileInputRef}
@@ -436,7 +474,7 @@ export default function Home() {
                       />
                       {status !== "recording" ? (
                         <div className="flex items-center justify-center gap-4">
-                          <Button onClick={handleStartRecording} disabled={isWorking}>
+                          <Button onClick={handleStartRecording} disabled={isWorking || !hasMicPermission}>
                             <Mic className="mr-2 h-4 w-4" />
                             Start Recording
                           </Button>
@@ -564,5 +602,3 @@ export default function Home() {
     </div>
   );
 }
-
-    
