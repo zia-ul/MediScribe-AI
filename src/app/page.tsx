@@ -302,8 +302,8 @@ export default function Home() {
         reader.onloadend = () => {
           const base64Audio = reader.result as string;
           processAudio(base64Audio, audioUrl);
+          stream.getTracks().forEach(track => track.stop());
         };
-        stream.getTracks().forEach(track => track.stop());
       });
 
       mediaRecorder.current.start();
