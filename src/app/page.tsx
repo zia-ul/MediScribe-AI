@@ -151,9 +151,21 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
 
-  const [chatHistory, setChatHistory] = useState<ChatHistory>([]);
+  const [chatHistory, setChatHistory] = useState<ChatHistory>([
+    { role: "model", content: "Good morning, Mr. Adams. What brings you in today?" },
+    { role: "user", content: "Morning, Doctor. I've been having a constant headache for the past few days. It's dull but doesn’t go away." },
+    { role: "model", content: "I see. On a scale of 1 to 10, how painful would you say it is?" },
+    { role: "user", content: "Around a 4 or 5. It's not unbearable, but it’s very annoying and distracting." },
+    { role: "model", content: "Got it. Have you had any other symptoms? Fever, nausea, vision changes?" },
+    { role: "user", content: "Not really. Just the headache and a bit of tiredness." },
+    { role: "model", content: "Alright. I’ll check your blood pressure and do a quick neurological exam. Have you been under more stress than usual lately?" },
+    { role: "user", content: "Yeah, work’s been pretty intense. I haven’t been sleeping much either." },
+    { role: "model", content: "That could definitely be contributing. Let’s run a few tests to rule out anything serious, and I’ll also give you some advice on managing stress and sleep. Sound good?" },
+    { role: "user", content: "Sounds good. Thanks, Doctor." },
+  ]);
   const [chatInput, setChatInput] = useState("");
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const isInitialMount = useRef(true);
 
   const clearAll = () => {
     setTranscript(null);
@@ -188,6 +200,20 @@ export default function Home() {
         });
     }
   }, [toast]);
+
+  useEffect(() => {
+    const runInitialAnalysis = async () => {
+      if (isInitialMount.current && chatHistory.length > 0) {
+        const fullTranscript = chatHistory
+          .map(m => `${m.role === 'user' ? 'Patient' : 'Doctor'}: ${m.content}`)
+          .join('\n');
+        setTranscript(fullTranscript);
+        await runAnalysis(fullTranscript);
+        isInitialMount.current = false;
+      }
+    };
+    runInitialAnalysis();
+  }, []);
 
   const processAudio = useCallback(async (base64Audio: string) => {
     clearAll();
@@ -432,7 +458,7 @@ export default function Home() {
               <CardTitle>Extracted Medical Entities</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {status === 'analyzing' ? (<div className="space-y-4">
+              {status === 'analyzing' && !entities ? (<div className="space-y-4">
                 <Skeleton className="h-8 w-1/3" />
                 <div className="flex flex-wrap gap-2"><Skeleton className="h-6 w-20 rounded-full" /><Skeleton className="h-6 w-24 rounded-full" /></div>
                 <Skeleton className="h-8 w-1/3" />
@@ -469,7 +495,7 @@ export default function Home() {
               <CardTitle>Generated SOAP Note</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {status === 'analyzing' ? (<div className="space-y-6">
+              {status === 'analyzing' && !soapNote ? (<div className="space-y-6">
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /></div>
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" /></div>
                 <div><Skeleton className="h-6 w-1/4 mb-2" /><Skeleton className="h-4 w-full" /></div>
