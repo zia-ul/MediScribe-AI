@@ -176,10 +176,7 @@ export default function Home() {
   useEffect(() => {
     const getMicPermission = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // We have permission, but we don't need to hold on to the stream yet.
-        // We'll request it again when recording starts.
-        stream.getTracks().forEach(track => track.stop());
+        await navigator.mediaDevices.getUserMedia({ audio: true });
         setHasMicPermission(true);
       } catch (error) {
         console.error("Error accessing microphone:", error);
@@ -296,27 +293,29 @@ export default function Home() {
       const recorder = new MediaRecorder(stream);
       mediaRecorder.current = recorder;
       
-      recorder.addEventListener("dataavailable", (event) => {
+      recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunks.current.push(event.data);
         }
-      });
+      };
 
-      recorder.addEventListener("stop", () => {
-        const audioBlob = new Blob(audioChunks.current, { type: recorder.mimeType });
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunks.current, { type: mediaRecorder.current?.mimeType });
         const audioUrl = URL.createObjectURL(audioBlob);
+        
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
           const base64Audio = reader.result as string;
           processAudio(base64Audio, audioUrl);
-          // Stop the stream tracks after processing is complete
-          if (audioStream.current) {
-            audioStream.current.getTracks().forEach(track => track.stop());
-            audioStream.current = null;
-          }
         };
-      });
+        
+        // Stop the stream tracks after processing is initiated
+        if (audioStream.current) {
+          audioStream.current.getTracks().forEach(track => track.stop());
+          audioStream.current = null;
+        }
+      };
 
       recorder.start();
       setStatus("recording");
