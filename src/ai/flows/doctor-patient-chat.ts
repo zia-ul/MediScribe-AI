@@ -9,7 +9,7 @@
  */
 
 import { ai } from '@/ai/genkit';
-import { z, generate } from 'genkit';
+import { z } from 'genkit';
 
 const MessageSchema = z.object({
   role: z.enum(['user', 'model', 'system']),
@@ -29,27 +29,24 @@ export type DoctorPatientChatOutput = z.infer<
   typeof DoctorPatientChatOutputSchema
 >;
 
+const doctorChatPrompt = ai.definePrompt({
+    name: 'doctorChatPrompt',
+    system: 'You are a compassionate and knowledgeable doctor. Your role is to converse with a patient (the user) to understand their symptoms and concerns. Be professional, empathetic, and clear in your communication. Ask clarifying questions to gather necessary medical information. The user is the patient.',
+    output: {
+        schema: z.object({ response: z.string() })
+    }
+});
+
+
 async function doctorPatientChatFlow(
   input: DoctorPatientChatInput
 ): Promise<DoctorPatientChatOutput> {
-  const systemPrompt = `You are a compassionate and knowledgeable doctor. Your role is to converse with a patient (the user) to understand their symptoms and concerns. Be professional, empathetic, and clear in your communication. Ask clarifying questions to gather necessary medical information. The user is the patient.`;
-
   if (input.history.length === 0) {
     return { response: "Hello, how can I help you today?" };
   }
-  
-  const llmResponse = await generate({
-    model: 'googleai/gemini-pro',
-    history: [
-      { role: 'system', content: systemPrompt },
-      ...input.history,
-    ],
-    prompt: '', // The last message from the user is already in the history array
-    output: {
-      schema: z.object({
-        response: z.string(),
-      })
-    }
+
+  const llmResponse = await doctorChatPrompt({
+      history: input.history,
   });
 
   const output = llmResponse.output();
