@@ -241,7 +241,7 @@ export default function Home() {
         setChatHistory(initialChat);
     }
     runInitialAnalysis();
-  }, [runAnalysis]);
+  }, [runAnalysis, chatHistory.length]);
 
   const processAudio = useCallback(async (base64Audio: string, audioBlobUrl: string) => {
     setAudioURL(audioBlobUrl);
@@ -286,7 +286,7 @@ export default function Home() {
     audioChunks.current = [];
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder.current = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaRecorder.current = new MediaRecorder(stream);
       
       mediaRecorder.current.addEventListener("dataavailable", (event) => {
         if (event.data.size > 0) {
@@ -295,7 +295,7 @@ export default function Home() {
       });
 
       mediaRecorder.current.addEventListener("stop", () => {
-        const audioBlob = new Blob(audioChunks.current, { type: "audio/webm" });
+        const audioBlob = new Blob(audioChunks.current, { type: mediaRecorder.current?.mimeType });
         const audioUrl = URL.createObjectURL(audioBlob);
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
