@@ -152,18 +152,7 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
 
-  const [chatHistory, setChatHistory] = useState<ChatHistory>([
-    { role: "model", content: "Good morning, Mr. Adams. What brings you in today?" },
-    { role: "user", content: "Morning, Doctor. I've been having a constant headache for the past few days. It's dull but doesn’t go away." },
-    { role: "model", content: "I see. On a scale of 1 to 10, how painful would you say it is?" },
-    { role: "user", content: "Around a 4 or 5. It's not unbearable, but it’s very annoying and distracting." },
-    { role: "model", content: "Got it. Have you had any other symptoms? Fever, nausea, vision changes?" },
-    { role: "user", content: "Not really. Just the headache and a bit of tiredness." },
-    { role: "model", content: "Alright. I’ll check your blood pressure and do a quick neurological exam. Have you been under more stress than usual lately?" },
-    { role: "user", content: "Yeah, work’s been pretty intense. I haven’t been sleeping much either." },
-    { role: "model", content: "That could definitely be contributing. Let’s run a few tests to rule out anything serious, and I’ll also give you some advice on managing stress and sleep. Sound good?" },
-    { role: "user", content: "Sounds good. Thanks, Doctor." },
-  ]);
+  const [chatHistory, setChatHistory] = useState<ChatHistory>([]);
   const [chatInput, setChatInput] = useState("");
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
@@ -216,6 +205,21 @@ export default function Home() {
         isInitialMount.current = false;
       }
     };
+    if (isInitialMount.current) {
+        const initialChat: ChatHistory = [
+            { role: "model", content: "Good morning, Mr. Adams. What brings you in today?" },
+            { role: "user", content: "Morning, Doctor. I've been having a constant headache for the past few days. It's dull but doesn’t go away." },
+            { role: "model", content: "I see. On a scale of 1 to 10, how painful would you say it is?" },
+            { role: "user", content: "Around a 4 or 5. It's not unbearable, but it’s very annoying and distracting." },
+            { role: "model", content: "Got it. Have you had any other symptoms? Fever, nausea, vision changes?" },
+            { role: "user", content: "Not really. Just the headache and a bit of tiredness." },
+            { role: "model", content: "Alright. I’ll check your blood pressure and do a quick neurological exam. Have you been under more stress than usual lately?" },
+            { role: "user", content: "Yeah, work’s been pretty intense. I haven’t been sleeping much either." },
+            { role: "model", content: "That could definitely be contributing. Let’s run a few tests to rule out anything serious, and I’ll also give you some advice on managing stress and sleep. Sound good?" },
+            { role: "user", content: "Sounds good. Thanks, Doctor." },
+        ];
+        setChatHistory(initialChat);
+    }
     runInitialAnalysis();
   }, [runAnalysis]);
 
@@ -250,28 +254,28 @@ export default function Home() {
 
   const handleStartRecording = useCallback(async () => {
     clearAll();
-    audioChunks.current = [];
     setStatus("recording");
+    audioChunks.current = [];
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      mediaRecorder.current.ondataavailable = event => {
-        if (event.data.size > 0) {
-          audioChunks.current.push(event.data);
-        }
-      };
-      mediaRecorder.current.onstop = () => {
-        const audioBlob = new Blob(audioChunks.current, {
-          type: "audio/webm",
-        });
+      mediaRecorder.current = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      
+      mediaRecorder.current.addEventListener("dataavailable", (event) => {
+        audioChunks.current.push(event.data);
+      });
+
+      mediaRecorder.current.addEventListener("stop", () => {
+        const audioBlob = new Blob(audioChunks.current, { type: "audio/webm" });
         const audioUrl = URL.createObjectURL(audioBlob);
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
-        reader.onloadend = async () => {
+        reader.onloadend = () => {
           const base64Audio = reader.result as string;
-          await processAudio(base64Audio, audioUrl);
+          processAudio(base64Audio, audioUrl);
         };
-      };
+        stream.getTracks().forEach(track => track.stop());
+      });
+
       mediaRecorder.current.start();
     } catch (error) {
       console.error("Error accessing microphone:", error);
@@ -279,8 +283,7 @@ export default function Home() {
       toast({
         variant: "destructive",
         title: "Microphone Access Denied",
-        description:
-          "Please allow microphone access in your browser settings to use this feature.",
+        description: "Please allow microphone access in your browser settings to use this feature.",
       });
     }
   }, [toast, processAudio]);
@@ -561,3 +564,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
